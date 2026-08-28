@@ -38,6 +38,18 @@
   CLAUDE.md §9.7에 이미 적혀 있던 패턴 — `minmax(0,1fr)`로 고침. 파일 맨 끝에
   같은 조건의 블록을 다시 내는 방식으로(§9.7 관행), 원본 미디어쿼리 줄은 그대로 뒀다.
 
+## 배포 후 CI에서 잡힌 것 (스모크 테스트 자체의 결함)
+
+첫 push 후 GitHub Actions `test` 워크플로가 실패했다. 원인은 앱이 아니라
+**스모크 테스트가 너무 엄격했던 것** — 저장 버튼을 눌러 실제 배포된 Supabase에
+`hd19_analysis_results`(아직 대표가 SQL을 안 돌려 테이블 없음) 요청을 보내면,
+브라우저가 그 실패한 fetch를 **콘솔에 "Failed to load resource: 404"로 자동
+기록**한다. 이건 우리 코드가 try/catch로 이미 정상 처리(→ "저장 기능은 곧
+활성화됩니다" 안내)해도 브라우저가 항상 남기는 로그라, `console error 타입 개수
+== 0`으로 재던 원래 테스트 기준이 이 정상 케이스를 매번 실패로 오판했다.
+→ `page.on('pageerror')`(진짜 미처리 예외)와 "Failed to load resource" 패턴의
+console 메시지(네트워크 잡음)를 분리해, 전자만 실패 기준으로 삼도록 수정.
+
 ## 검증
 
 - `node test/logic.test.js` — 12개 전부 통과. **일부러 `level:'danger'`를

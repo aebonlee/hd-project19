@@ -47,12 +47,24 @@ function serve(port) {
   var PORT = 8819;
   var server = serve(PORT);
   var browser = await chromium.launch();
+  // 미처리 예외(pageerror)만 "진짜 오류"로 본다. console 'error' 타입에는
+  // 실패한 네트워크 요청(fetch 404 등)에 대해 브라우저가 자동으로 남기는
+  // "Failed to load resource" 로그도 섞여 들어오는데, 그건 우리 코드가
+  // try/catch로 이미 정상 처리한 것이라도 브라우저가 항상 찍는다 — 그러니
+  // 그것까지 "오류"로 세면 저장 기능을 아직 안 켠 서버(테이블 없음) 상태에서
+  // 매번 거짓 실패가 난다. consoleNoise는 참고용으로만 남긴다.
   var errors = [];
+  var consoleNoise = [];
 
   try {
     var page = await (await browser.newContext({ viewport: { width: 1400, height: 900 } })).newPage();
     page.on('pageerror', function (e) { errors.push(String(e)); });
-    page.on('console', function (m) { if (m.type() === 'error') errors.push(m.text()); });
+    page.on('console', function (m) {
+      if (m.type() !== 'error') return;
+      var text = m.text();
+      if (/Failed to load resource/i.test(text)) { consoleNoise.push(text); return; }
+      errors.push(text);
+    });
     await page.goto('http://127.0.0.1:' + PORT + '/', { waitUntil: 'networkidle' });
 
     group('1. 화면이 오류 없이 뜬다');
@@ -92,6 +104,11 @@ function serve(port) {
     server.close();
   }
 
+  if (consoleNoise.length) {
+    console.log('\n(참고, 실패 아님) 실패한 네트워크 요청 ' + consoleNoise.length + '건 — ' +
+      '서버 테이블(hd19_analysis_results)이 아직 없으면 저장 시도 시 정상적으로 뜬다:');
+    consoleNoise.slice(0, 3).forEach(function (n) { console.log('  · ' + n); });
+  }
   console.log('\n' + (failed ? 'X' : 'O') + ' ' + passed + ' 통과 / ' + failed + ' 실패');
   process.exit(failed ? 1 : 0);
 }());
