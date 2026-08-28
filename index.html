@@ -4,7 +4,8 @@
 <!--
   원 해석 로직(강체 6DOF 고유진동수/모드 계산 — Jacobi 고유값 분해, Cholesky 분해 등)은
   김완호(HD건설기계) 님이 만든 anakizz/6DOF-vibration 원본을 그대로 가져왔다. 손대지 않았다.
-  이 리포에서 새로 얹은 것: 4. 결과 저장(서버) 카드, 결과 해설(규칙기반) 패널, AI 챗봇 준비중 버튼.
+  이 리포에서 새로 얹은 것: 4. 결과 저장(이 브라우저에만) 카드, 결과 해설(규칙기반) 패널, AI 챗봇 준비중 버튼.
+  서버(Supabase) 의존은 걷어내고 다른 hd-project처럼 완전한 정적·백엔드 0 구조로 되돌렸다.
   자세한 내용은 Dev_md/2026-08-28_hd19-6dof-vibration-이식.md 참고.
 -->
 <meta charset="UTF-8">
@@ -17,7 +18,7 @@
 <meta property="og:site_name" content="HD 생성형 AI 업무자동화 전문가과정">
 <meta property="og:url" content="https://aebonlee.github.io/hd-project19/">
 <meta property="og:title" content="강체 6DOF 마운트 진동 / 공진 해석 — HD 생성형 AI 업무자동화 전문가과정">
-<meta property="og:description" content="4개 마운트의 위치·강성과 강체 질량·무게중심·관성모멘트로 6DOF 고유진동수·모드결합을 계산하고 결과를 서버에 저장합니다.">
+<meta property="og:description" content="4개 마운트의 위치·강성과 강체 질량·무게중심·관성모멘트로 6DOF 고유진동수·모드결합을 계산합니다. 계산은 전부 브라우저 안에서 끝납니다.">
 <meta property="og:image" content="https://aebonlee.github.io/hd-project19/og-index.png">
 <meta property="og:image:width" content="1200">
 <meta property="og:image:height" content="630">
@@ -128,11 +129,11 @@ button:hover{filter:brightness(.96)}
 </div>
 
 <div class="card">
-<h2>4. 결과 저장 (서버)</h2>
-<div class="note">CSV 내보내기와 별개로, 이번 해석 조건과 결과를 서버(Supabase)에 저장해 나중에 다른 기기에서도 불러올 수 있습니다. 이 브라우저에서 저장한 기록만 "내 기록 불러오기"에 나타납니다(로컬에 저장된 익명 식별자 기준).</div>
+<h2>4. 결과 저장 (이 브라우저에만)</h2>
+<div class="note">CSV 내보내기와 별개로, 이번 해석 조건과 결과를 이 브라우저 안에 저장해 나중에 다시 불러올 수 있습니다. 서버로 전송되지 않으며, 브라우저 저장공간을 지우면 함께 사라집니다. 다른 기기·다른 브라우저에서는 보이지 않습니다.</div>
 <div class="btns">
 <input id="saveLabel" type="text" placeholder="저장 이름 (예: 1호기 마운트안 A)" style="max-width:220px">
-<button class="primary" id="saveBtn" onclick="hd19SaveResult()" disabled>서버에 저장</button>
+<button class="primary" id="saveBtn" onclick="hd19SaveResult()" disabled>이 브라우저에 저장</button>
 <button class="secondary" onclick="hd19LoadResultList()">내 기록 불러오기</button>
 </div>
 <div id="hd19SaveStatus" class="small" style="margin-top:8px"></div>
@@ -772,8 +773,6 @@ refreshAnimationView();
 analyze();
 </script>
 <script src="js/interpret.js"></script>
-<!-- supabase-js는 리포에 동봉된 로컬 사본을 쓴다 — 폐쇄망에서도 즉시 뜨도록(CLAUDE.md CDN 의존 금지 방침) -->
-<script src="lib/supabase.min.js"></script>
 <script src="js/store.js"></script>
 
 <!-- hd-project 공지 팝업 (2026-08-29, 전 리포 공통) -->
@@ -784,8 +783,9 @@ analyze();
     <div style="font-size:14px;line-height:1.75;color:#334;word-break:keep-all;overflow-wrap:break-word;">
       <p>이 프로젝트는 GitHub에 <b>공개(Public)</b>로 올라와 있습니다. 우측 상단 <b>Fork</b> 버튼이나 <b>Code → Download ZIP</b>으로 언제든 그대로 가져가실 수 있습니다.</p>
       <p>화면의 예시 데이터는 실제 회사 자료가 아닌 가상 값입니다. 실제 데이터로 쓰실 때는 그 부분만 채워 넣으시면 됩니다.</p>
-      <p><b>이번에 반영한 것</b>: 기존 진동/공진 해석 로직은 그대로 두고, 말씀하신 서버 저장(Supabase)과 결과를 쉬운 말로 설명해주는 해설 기능을 추가했습니다.</p>
-      <p><b>진행 중인 것</b>: 서버 저장은 저희 쪽 DB 설정이 아직 안 끝나 지금은 "곧 활성화됩니다"로 뜹니다. AI 챗봇은 실제 대화형 AI 대신 규칙 기반 해설로 1차 구현했습니다.</p>
+      <p><b>이번에 반영한 것</b>: 기존 진동/공진 해석 로직은 그대로 두고, 결과를 쉬운 말로 설명해주는 해설 기능을 추가했습니다. 처음 요청하셨던 서버 저장은 이 프로젝트도 다른 hd-project처럼 서버 없이 브라우저 안에서만 완결되는 구조가 더 낫다고 판단해, "이 브라우저에만 저장"하는 방식으로 바꿨습니다(4번 카드).</p>
+      <p><b>계산 검증</b>: 핵심 계산 엔진(Jacobi 고유값분해·Cholesky 분해)을 독립적으로 재구현해 대조했고, 예제 데이터의 이론값과 정확히 일치하는 것을 확인했습니다.</p>
+      <p><b>진행 중인 것</b>: AI 챗봇은 실제 대화형 AI 대신 규칙 기반 해설로 1차 구현했습니다.</p>
     </div>
     <div style="margin-top:20px;text-align:right;">
       <button id="hd-notice-close" style="background:#0d2137;color:#fff;border:none;border-radius:8px;padding:10px 20px;font-size:13px;font-weight:700;cursor:pointer;">확인했습니다</button>

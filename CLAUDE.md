@@ -2,8 +2,13 @@
 
 - 제출자: 김완호 (HD건설기계)
 - 출처: 생성형 AI 업무자동화 전문가과정 — 수강생이 자체 제작해 이메일로 제출(2026-08-27), 대표가 hd-project19로 이식
-- 프로젝트 유형: 공학 계산기(강체 동역학) + 결과 서버 저장 + 규칙기반 결과 해설
+- 프로젝트 유형: 공학 계산기(강체 동역학) + 결과 로컬 저장 + 규칙기반 결과 해설
 - 원본: [anakizz/6DOF-vibration](https://github.com/anakizz/6DOF-vibration) — 해석 로직은 원본 그대로, 이 리포에서 저장/해설 기능만 얹었다.
+
+> **2026-08-29 정정**: 처음엔 "서버(SQL)에 저장" 요청을 그대로 Supabase로 구현했으나,
+> 대표가 "자체 계산으로만 움직이는 페이지가 더 좋겠다"고 판단해 **서버 의존을 전부
+> 걷어내고 localStorage 전용으로 되돌렸다**. `supabase/schema.sql`·`lib/supabase.min.js`는
+> 삭제했다. 같은 날 계산 엔진(Jacobi/Cholesky)도 독립 재구현으로 검증했다 — 6번 항목 참고.
 
 > ⚠ **이 문서도 기획서 원문이 아니라 되짚어 쓴 것이다** (hd-project13과 같은 상황).
 > 김완호 님이 보낸 것은 완성된 웹앱 링크와 짧은 이메일 요청 두 줄
@@ -14,21 +19,21 @@
 
 ## 0. Claude Code에게 — 작업 방식
 
-1. **원 해석 로직(`analyze()`와 그 아래 Jacobi/Cholesky 등 수학 함수들)은 절대 건드리지 않는다.** 김완호 님이 이미 검증한 엔지니어링 계산이다. 고칠 일이 생기면 반드시 먼저 확인받는다.
-2. 새 기능은 전부 별도 파일에 둔다 — `js/interpret.js`(결과 해설, 순수함수), `js/store.js`(Supabase 저장/불러오기). `index.html`의 원본 `<script>` 블록 안에는 `if(window.hd19OnAnalyze) window.hd19OnAnalyze(modes);` 훅 한 줄만 추가돼 있다.
-3. `test/logic.test.js`는 `js/interpret.js`만 검증한다. 원본 계산 로직은 DOM과 얽혀 있고 원작자가 이미 검증했으므로 여기서 다시 재현하지 않는다.
-4. 서버 저장은 **테이블이 없어도 화면이 죽지 않아야 한다** — `supabase/schema.sql`을 대표가 아직 SQL Editor에서 안 돌렸을 수 있기 때문(§2.1 sqld 사고 재발 방지). `js/store.js`의 `isTableMissing()`이 이 경계를 처리한다.
+1. **원 해석 로직(`analyze()`와 그 아래 Jacobi/Cholesky 등 수학 함수들)은 절대 건드리지 않는다.** 김완호 님이 이미 검증한 엔지니어링 계산이고, 2026-08-29에 독립 재구현으로 정확성까지 확인했다(6번 항목). 고칠 일이 생기면 반드시 먼저 확인받는다.
+2. 새 기능은 전부 별도 파일에 둔다 — `js/interpret.js`(결과 해설, 순수함수), `js/store.js`(localStorage 저장/불러오기). `index.html`의 원본 `<script>` 블록 안에는 `if(window.hd19OnAnalyze) window.hd19OnAnalyze(modes);` 훅 한 줄만 추가돼 있다.
+3. `test/engine.test.js`가 계산 엔진을, `test/logic.test.js`가 `js/interpret.js`를 검증한다. 계산 엔진은 index.html 안의 수식을 복붙 검증하지 않고 **독립적으로 다시 짜서** 이론값과 대조한다(복붙 검증은 같은 실수를 그대로 통과시킨다).
+4. 저장은 서버 없이 **이 브라우저의 localStorage 안에서만** 끝난다. 브라우저 저장공간이 막힌 환경(사생활 보호 모드 등)에서도 화면 자체는 죽지 않아야 한다 — `js/store.js`가 try/catch로 감싼다.
 
 ---
 
 ## 1. 한 줄 요약
 
-4개 마운트의 위치·강성 + 강체 질량·무게중심·관성모멘트를 입력하면 6개 고유진동수와 모드 결합을 계산하고, 그 결과를 서버에 저장/불러오거나 참고용 해설을 볼 수 있는 도구.
+4개 마운트의 위치·강성 + 강체 질량·무게중심·관성모멘트를 입력하면 6개 고유진동수와 모드 결합을 계산하고, 그 결과를 이 브라우저에 저장/불러오거나 참고용 해설을 볼 수 있는 도구. 계산은 전부 클라이언트에서 끝난다 — 서버 없음.
 
 ## 2. 배경
 
 HD건설기계 사내에서 장비 마운트(엔진·운전실 등) 설계 시 반복하는 6DOF 공진 해석을 웹 계산기로 자동화한 것이 원본. 김완호 님이 두 가지를 추가로 요청:
-- 결과를 CSV뿐 아니라 서버(SQL)에 저장 → 이 리포에서 Supabase로 구현.
+- 결과를 CSV뿐 아니라 서버(SQL)에 저장 → 처음엔 Supabase로 구현했으나, 대표가 "자체 계산으로만 움직이는 페이지가 더 좋겠다"고 정정해 **localStorage 전용**으로 되돌렸다(2026-08-29).
 - AI 연동 아이디어 요청 → 막연한 요청이라 "규칙 기반 결과 해설"로 1차 구현, 진짜 대화형 AI는 범위 밖으로 명시.
 
 ## 3. 요구 기능
@@ -38,9 +43,9 @@ HD건설기계 사내에서 장비 마운트(엔진·운전실 등) 설계 시 �
 - CSV 템플릿 다운로드 / 업로드 / 결과 CSV 내보내기.
 - 3D 애니메이션 뷰(모드 형상 시각화).
 
-### 3.2 (신규) 결과 서버 저장
-- `supabase/schema.sql` — `hd19_analysis_results` 테이블(입력 JSON + 결과 JSON). RLS: anon insert/select 허용(로그인이 없어 완전한 소유자 격리는 불가 — 스키마 파일 상단 주석에 그 한계를 명시했다).
-- 브라우저 localStorage의 무작위 UUID로 "내 기록"만 화면에 보여준다.
+### 3.2 (신규) 결과 로컬 저장
+- 서버 없음. `localStorage`(`hd19_saved_results` 키)에 최근 20건까지 JSON 배열로 저장.
+- 이 브라우저에서만 보인다 — 다른 기기·브라우저·저장공간 삭제 시 함께 사라진다는 한계를 화면에 명시.
 - `js/store.js`: `hd19SaveResult()` / `hd19LoadResultList()`.
 
 ### 3.3 (신규) 결과 해설 (참고용)
@@ -49,21 +54,26 @@ HD건설기계 사내에서 장비 마운트(엔진·운전실 등) 설계 시 �
 
 ## 4. 데이터 스키마
 
-`supabase/schema.sql` 참고. 재실행 안전, 대표가 SQL Editor에서 직접 실행해야 한다(§3.7).
+DB 없음. 저장 레코드 형태(localStorage JSON): `{id, label, created_at, inputs, results}` — `js/store.js`의 `collectInputs()`/`hd19SaveResult()` 참고.
 
 ## 5. 제약·가정
 
-- 정적 사이트, 빌드 단계 없음, GitHub Pages(Actions) 배포.
-- Supabase URL/anon key는 공용 프로젝트(hcmgdztsgjvzcyxyayaj) 값을 fallback 하드코딩(§3.2).
+- 정적 사이트, 빌드 단계 없음, 백엔드 0, GitHub Pages(Actions) 배포.
 - 결과 해설의 주파수 대역 구분은 일반적인 경험칙이며 이 장비의 실측치가 아니다 — 화면에도 "참고용"이라고 명시했다.
 
 ## 6. 검증
 
 ```
+node test/engine.test.js     # 계산 엔진(Jacobi/Cholesky) 독립 재구현 대조 — 4건
 node test/logic.test.js      # js/interpret.js 단위 테스트 12건
 node test/smoke.browser.js   # 화면 연기 테스트 — playwright 필요
 ```
-`supabase/schema.sql`은 로컬 임시 PostgreSQL에 실제 적용해 재실행 안전성과 anon 권한 경계(insert/select만 되고 update/delete는 막힘)를 확인했다(§3.7).
+
+`test/engine.test.js`는 index.html의 원본 계산 함수를 복붙하지 않고 별도로 다시 짜서 대조한다.
+대칭 예시 데이터(`setExample()`)는 물리적으로 6개 모드가 완전히 디커플돼야 하므로, 이 성질
+자체가 강한 회귀 검사가 된다 — Z-bounce 모드 이론값(f=√(4·kz_total/m)/2π)과 소수점 6자리까지
+일치 확인(2026-08-29). 일부러 N/mm→N/m 단위변환을 빼먹은 버전으로 깨뜨려 이 검사기가
+실제로 잡는지도 확인했다(§5.5).
 
 ## 부록 A — 기획서 원문
 

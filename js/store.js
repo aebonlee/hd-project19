@@ -1,43 +1,20 @@
 /*
- * 결과 저장(서버) + 결과 해설 연결부.
+ * 결과 저장(로컬) + 결과 해설 연결부.
  *
  * index.html 의 원본 해석 로직(analyze() 등)은 건드리지 않는다. 대신 analyze()
  * 끝에서 window.hd19OnAnalyze(modes) 를 호출하도록 한 줄만 추가해 뒀고, 여기서
  * 그 훅을 받아 (1) 저장 버튼을 켜고 (2) 결과 해설 패널을 채운다.
  *
- * ⚠ 대표가 SQL Editor에서 supabase/schema.sql 을 아직 실행하지 않은 상태에서도
- * 이 화면 자체는 절대 죽으면 안 된다(CLAUDE.md §2.1 sqld 사고 재발 방지) — 그래서
- * 저장/불러오기는 실패해도 try/catch로 감싸고 "곧 활성화됩니다" 안내로 우아하게
- * 넘어간다. 계산·CSV 내보내기 등 원래 기능은 이 파일이 없어도 100% 그대로 동작한다.
+ * 서버(Supabase) 의존을 걷어내고 이 리포도 다른 hd-project들과 같은 완전한
+ * 정적·백엔드 0 구조로 되돌렸다 — 저장은 이 브라우저의 localStorage 안에서만
+ * 끝난다. 다른 기기·다른 브라우저에서는 안 보인다(로컬 전용이라는 한계를 화면에도
+ * 밝혀 둔다).
  */
 (function () {
   'use strict';
 
-  var SUPABASE_URL = 'https://hcmgdztsgjvzcyxyayaj.supabase.co';
-  var SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImhjbWdkenRzZ2p2emN5eHlheWFqIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzE0MzU4ODcsImV4cCI6MjA4NzAxMTg4N30.gznaPzY1l8qDAPsEyYNR9KS7f7VqS3xaw-_2HTSwSZw';
-  var TABLE = 'hd19_analysis_results';
-  var OWNER_KEY = 'hd19_owner_id';
-
-  var client = null;
-  try {
-    if (window.supabase && typeof window.supabase.createClient === 'function') {
-      client = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
-    }
-  } catch (e) { client = null; }
-
-  function getOwnerId() {
-    try {
-      var id = localStorage.getItem(OWNER_KEY);
-      if (!id) {
-        id = (crypto.randomUUID ? crypto.randomUUID() : String(Date.now()) + Math.random().toString(16).slice(2));
-        localStorage.setItem(OWNER_KEY, id);
-      }
-      return id;
-    } catch (e) {
-      // localStorage가 막힌 환경(사생활 보호 모드 등) — 저장 기능만 비활성.
-      return null;
-    }
-  }
+  var STORAGE_KEY = 'hd19_saved_results';
+  var MAX_RECORDS = 20;
 
   function v(id) { var el = document.getElementById(id); return el ? parseFloat(el.value) || 0 : 0; }
 
@@ -80,12 +57,20 @@
     el.textContent = msg;
   }
 
-  // 테이블이 아직 없을 때 나는 PostgREST 오류(테이블 없음 42P01 / 스키마 캐시에 없음 PGRST205)를
-  // "서버 설정 전"으로 인식해 조용히 안내만 하고, 그 외 진짜 오류와는 구분한다.
-  function isTableMissing(err) {
-    var code = (err && (err.code || '')) + '';
-    var msg = (err && (err.message || '')) + '';
-    return code === '42P01' || code === 'PGRST205' || /relation .* does not exist/i.test(msg) || /Could not find the table/i.test(msg);
+  // localStorage가 막힌 환경(사생활 보호 모드 등)에서도 조용히 죽지 않는다.
+  function readRecords() {
+    try {
+      var raw = localStorage.getItem(STORAGE_KEY);
+      var list = raw ? JSON.parse(raw) : [];
+      return Array.isArray(list) ? list : [];
+    } catch (e) { return null; }
+  }
+
+  function writeRecords(list) {
+    try {
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(list));
+      return true;
+    } catch (e) { return false; }
   }
 
   window.hd19OnAnalyze = function (modes) {
@@ -99,73 +84,50 @@
     }
   };
 
-  window.hd19SaveResult = async function () {
+  window.hd19SaveResult = function () {
     var labelEl = document.getElementById('saveLabel');
     var label = labelEl ? labelEl.value.trim() : '';
     if (!label) { setStatus('저장 이름을 입력하세요.', true); return; }
     if (!window.lastModes) { setStatus('먼저 공진 해석을 실행하세요.', true); return; }
-    if (!client) { setStatus('저장 기능은 곧 활성화됩니다.'); return; }
-    var ownerId = getOwnerId();
-    if (!ownerId) { setStatus('이 브라우저에서는 저장 기능을 쓸 수 없습니다(사생활 보호 모드 등).', true); return; }
 
-    setStatus('저장 중…');
-    try {
-      var row = {
-        owner_id: ownerId,
-        label: label,
-        inputs: collectInputs(),
-        results: window.lastModes.map(function (m) { return { f: m.f, w: m.w, dominant: m.dominant, vec: m.vec }; })
-      };
-      var res = await client.from(TABLE).insert(row);
-      if (res.error) throw res.error;
-      setStatus('저장했습니다: "' + label + '"');
-      if (labelEl) labelEl.value = '';
-    } catch (e) {
-      if (isTableMissing(e)) {
-        setStatus('저장 기능은 곧 활성화됩니다 (관리자가 서버 설정을 아직 완료하지 않았습니다).', true);
-      } else {
-        setStatus('저장 실패: ' + (e && e.message ? e.message : String(e)), true);
-      }
-    }
+    var list = readRecords();
+    if (list === null) { setStatus('이 브라우저에서는 저장 기능을 쓸 수 없습니다(사생활 보호 모드 등).', true); return; }
+
+    list.unshift({
+      id: (crypto.randomUUID ? crypto.randomUUID() : String(Date.now()) + Math.random().toString(16).slice(2)),
+      label: label,
+      created_at: new Date().toISOString(),
+      inputs: collectInputs(),
+      results: window.lastModes.map(function (m) { return { f: m.f, w: m.w, dominant: m.dominant, vec: m.vec }; })
+    });
+    if (list.length > MAX_RECORDS) list.length = MAX_RECORDS;
+
+    if (!writeRecords(list)) { setStatus('저장 공간이 부족하거나 저장할 수 없습니다.', true); return; }
+    setStatus('이 브라우저에 저장했습니다: "' + label + '"');
+    if (labelEl) labelEl.value = '';
   };
 
-  window.hd19LoadResultList = async function () {
+  window.hd19LoadResultList = function () {
     var listEl = document.getElementById('hd19SavedList');
     if (!listEl) return;
-    if (!client) { setStatus('저장 기능은 곧 활성화됩니다.'); return; }
-    var ownerId = getOwnerId();
-    if (!ownerId) { setStatus('이 브라우저에서는 저장 기능을 쓸 수 없습니다.', true); return; }
 
-    listEl.textContent = '불러오는 중…';
-    try {
-      var res = await client.from(TABLE)
-        .select('id,label,created_at,inputs')
-        .eq('owner_id', ownerId)
-        .order('created_at', { ascending: false })
-        .limit(20);
-      if (res.error) throw res.error;
-      var rows = res.data || [];
-      if (!rows.length) { listEl.textContent = '저장된 기록이 없습니다.'; return; }
-      listEl.innerHTML = rows.map(function (r) {
-        var when = new Date(r.created_at).toLocaleString('ko-KR');
-        return '<div style="padding:4px 0;border-bottom:1px solid #eee">' +
-          '<a href="#" data-id="' + r.id + '" class="hd19-load-link" style="color:#1e5b91;font-weight:700;text-decoration:none">' +
-          (r.label || '(이름 없음)') + '</a> <span style="color:#999">' + when + '</span></div>';
-      }).join('');
-      Array.prototype.forEach.call(listEl.querySelectorAll('.hd19-load-link'), function (a) {
-        a.addEventListener('click', function (ev) {
-          ev.preventDefault();
-          var found = rows.find(function (r) { return String(r.id) === a.getAttribute('data-id'); });
-          if (found) { applyInputs(found.inputs); if (window.analyze) window.analyze(); setStatus('"' + found.label + '" 불러왔습니다.'); }
-        });
+    var rows = readRecords();
+    if (rows === null) { setStatus('이 브라우저에서는 저장 기능을 쓸 수 없습니다.', true); return; }
+    if (!rows.length) { listEl.textContent = '저장된 기록이 없습니다.'; return; }
+
+    listEl.innerHTML = rows.map(function (r) {
+      var when = new Date(r.created_at).toLocaleString('ko-KR');
+      return '<div style="padding:4px 0;border-bottom:1px solid #eee">' +
+        '<a href="#" data-id="' + r.id + '" class="hd19-load-link" style="color:#1e5b91;font-weight:700;text-decoration:none">' +
+        (r.label || '(이름 없음)') + '</a> <span style="color:#999">' + when + '</span></div>';
+    }).join('');
+    Array.prototype.forEach.call(listEl.querySelectorAll('.hd19-load-link'), function (a) {
+      a.addEventListener('click', function (ev) {
+        ev.preventDefault();
+        var found = rows.find(function (r) { return String(r.id) === a.getAttribute('data-id'); });
+        if (found) { applyInputs(found.inputs); if (window.analyze) window.analyze(); setStatus('"' + found.label + '" 불러왔습니다.'); }
       });
-    } catch (e) {
-      if (isTableMissing(e)) {
-        listEl.textContent = '저장 기능은 곧 활성화됩니다 (관리자가 서버 설정을 아직 완료하지 않았습니다).';
-      } else {
-        listEl.textContent = '불러오기 실패: ' + (e && e.message ? e.message : String(e));
-      }
-    }
+    });
   };
 
   // index.html 맨 끝에서 이 파일이 로드되기 전에 이미 analyze()가 한 번
