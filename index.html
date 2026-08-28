@@ -775,5 +775,37 @@ analyze();
 <!-- supabase-js는 리포에 동봉된 로컬 사본을 쓴다 — 폐쇄망에서도 즉시 뜨도록(CLAUDE.md CDN 의존 금지 방침) -->
 <script src="lib/supabase.min.js"></script>
 <script src="js/store.js"></script>
+
+<!-- hd-project 공지 팝업 (2026-08-29, 전 리포 공통) -->
+<div id="hd-notice-overlay" style="display:none;position:fixed;inset:0;background:rgba(10,20,35,.6);z-index:99999;align-items:center;justify-content:center;padding:20px;">
+  <div style="background:#fff;border-radius:14px;max-width:480px;width:100%;padding:26px 24px;box-shadow:0 12px 40px rgba(0,0,0,.28);font-family:'Pretendard','Apple SD Gothic Neo','Malgun Gothic','맑은 고딕',-apple-system,sans-serif;">
+    <h2 style="margin:0 0 4px;font-size:17px;color:#0d2137;">확인해 주세요</h2>
+    <p style="margin:0 0 14px;font-size:12px;color:#8a97a8;">2026-08-29 안내</p>
+    <div style="font-size:14px;line-height:1.75;color:#334;word-break:keep-all;overflow-wrap:break-word;">
+      <p>이 프로젝트는 GitHub에 <b>공개(Public)</b>로 올라와 있습니다. 우측 상단 <b>Fork</b> 버튼이나 <b>Code → Download ZIP</b>으로 언제든 그대로 가져가실 수 있습니다.</p>
+      <p>화면의 예시 데이터는 실제 회사 자료가 아닌 가상 값입니다. 실제 데이터로 쓰실 때는 그 부분만 채워 넣으시면 됩니다.</p>
+      <p><b>이번에 반영한 것</b>: 기존 진동/공진 해석 로직은 그대로 두고, 말씀하신 서버 저장(Supabase)과 결과를 쉬운 말로 설명해주는 해설 기능을 추가했습니다.</p>
+      <p><b>진행 중인 것</b>: 서버 저장은 저희 쪽 DB 설정이 아직 안 끝나 지금은 "곧 활성화됩니다"로 뜹니다. AI 챗봇은 실제 대화형 AI 대신 규칙 기반 해설로 1차 구현했습니다.</p>
+    </div>
+    <div style="margin-top:20px;text-align:right;">
+      <button id="hd-notice-close" style="background:#0d2137;color:#fff;border:none;border-radius:8px;padding:10px 20px;font-size:13px;font-weight:700;cursor:pointer;">확인했습니다</button>
+    </div>
+  </div>
+</div>
+<script>
+(function(){
+  try {
+    var KEY = 'hd_notice_20260829_dismissed';
+    if (localStorage.getItem(KEY) === '1') return;
+    var overlay = document.getElementById('hd-notice-overlay');
+    if (!overlay) return;
+    overlay.style.display = 'flex';
+    function close(){ overlay.style.display='none'; try{localStorage.setItem(KEY,'1');}catch(e){} }
+    document.getElementById('hd-notice-close').addEventListener('click', close);
+    overlay.addEventListener('click', function(e){ if(e.target===overlay) close(); });
+    document.addEventListener('keydown', function(e){ if(e.key==='Escape') close(); });
+  } catch(e) {}
+})();
+</script>
 </body>
 </html>
