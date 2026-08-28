@@ -62,7 +62,7 @@ console 메시지(네트워크 잡음)를 분리해, 전자만 실패 기준으�
 
 ## 다음 단계 / 남은 일
 
-- **og-image(1200×630) 미생성** — 다른 hd-project들의 `scripts/generate-og-image.mjs` 표준(§4)을 아직 안 붙였다. OG 텍스트 메타(og:title/description/url 등)는 넣었지만 og:image가 없다 — 다음 회차에 생성해 붙일 것.
+- ~~og-image(1200×630) 미생성~~ → **2026-08-29 해결**: `scripts/generate-og-image.mjs` 표준(hd-08 원본)으로 1200×630 `og-index.png` 생성, og:image 계열 메타 추가.
 
 - **대표가 SQL Editor에서 `supabase/schema.sql` 실행해야 저장 기능이 실제로 켜진다.**
   실행 전에도 화면은 정상 동작(저장 버튼 누르면 "곧 활성화됩니다" 안내).
