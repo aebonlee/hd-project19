@@ -1,0 +1,34 @@
+# 테스트 — main 브랜치 보호의 "필수 상태 체크"로 걸 수 있게 만든 것.
+name: test
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      # 의존성이 없다. 파일을 열면 그대로 도는 것이 이 저장소의 전제이므로
+      # npm install 단계 자체를 두지 않는다(playwright는 화면 연기 테스트에서만 임시 설치).
+      - name: 단위 테스트
+        run: node test/logic.test.js
+
+      # 원본 6DOF 해석 로직에 오타 하나면 페이지가 빈 화면이 된다.
+      # 파일을 읽어서는 안 잡힌다 — 실제로 띄워 봐야 잡힌다.
+      - name: 화면 연기 테스트
+        run: |
+          npm install --no-save playwright@latest
+          npx playwright install --with-deps chromium
+          node test/smoke.browser.js

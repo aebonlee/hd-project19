@@ -1,0 +1,775 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<!--
+  원 해석 로직(강체 6DOF 고유진동수/모드 계산 — Jacobi 고유값 분해, Cholesky 분해 등)은
+  김완호(HD건설기계) 님이 만든 anakizz/6DOF-vibration 원본을 그대로 가져왔다. 손대지 않았다.
+  이 리포에서 새로 얹은 것: 4. 결과 저장(서버) 카드, 결과 해설(규칙기반) 패널, AI 챗봇 준비중 버튼.
+  자세한 내용은 Dev_md/2026-08-28_hd19-6dof-vibration-이식.md 참고.
+-->
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex, nofollow">
+<link rel="canonical" href="https://aebonlee.github.io/hd-project19/">
+<link rel="icon" href="favicon-32.png">
+<link rel="apple-touch-icon" href="apple-touch-icon.png">
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="HD 생성형 AI 업무자동화 전문가과정">
+<meta property="og:url" content="https://aebonlee.github.io/hd-project19/">
+<meta property="og:title" content="강체 6DOF 마운트 진동 / 공진 해석 — HD 생성형 AI 업무자동화 전문가과정">
+<meta property="og:description" content="4개 마운트의 위치·강성과 강체 질량·무게중심·관성모멘트로 6DOF 고유진동수·모드결합을 계산하고 결과를 서버에 저장합니다.">
+<meta property="og:locale" content="ko_KR">
+<title>강체 6DOF 마운트 진동 / 공진 해석 - mm / N-mm + Mount Response</title>
+<style>
+:root{--bg:#f4f7f6;--card:#fff;--ink:#17211f;--muted:#66736f;--line:#d9e2df;--green:#145c4a;--green2:#0d4438;--orange:#e57b24;--blue:#1e5b91;--danger:#b43b3b}
+*{box-sizing:border-box} body{margin:0;background:var(--bg);color:var(--ink);font-family:"Nanum Gothic","Malgun Gothic",Arial,sans-serif}
+header{background:linear-gradient(135deg,var(--green2),var(--green));color:white;padding:24px 28px}
+header h1{margin:0 0 7px;font-size:25px} header p{margin:0;opacity:.86;font-size:13px}
+.wrap{max-width:1500px;margin:20px auto;padding:0 16px}.grid{display:grid;grid-template-columns:430px 1fr;gap:16px}
+.card{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:18px;box-shadow:0 4px 18px #15382d0c;margin-bottom:16px}
+h2{font-size:17px;margin:0 0 14px;color:var(--green2)} h3{font-size:14px;margin:18px 0 10px}
+.note{font-size:12px;color:var(--muted);line-height:1.55}
+.row{display:grid;grid-template-columns:1fr 1fr;gap:10px}.row3{display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px}
+label{display:block;font-size:11px;color:var(--muted);margin-bottom:4px}
+input,select,button{font:inherit} input,select{width:100%;padding:9px 10px;border:1px solid #cbd7d3;border-radius:8px;background:white}
+input:focus{outline:2px solid #e57b2430;border-color:var(--orange)}
+table{width:100%;border-collapse:collapse;font-size:12px}th,td{border-bottom:1px solid var(--line);padding:8px 6px;text-align:right}th{background:#f3f7f5;color:var(--green2);font-weight:700}th:first-child,td:first-child{text-align:left}
+.mount-table input{min-width:75px}.btns{display:flex;gap:8px;flex-wrap:wrap;margin-top:12px}
+button{border:0;border-radius:8px;padding:10px 14px;cursor:pointer;font-weight:700}
+.primary{background:var(--green);color:white}.orange{background:var(--orange);color:white}.secondary{background:#e8efec;color:var(--green2)}.danger{background:#f7e6e6;color:var(--danger)}
+button:hover{filter:brightness(.96)}
+.kpis{display:grid;grid-template-columns:repeat(6,1fr);gap:10px}.kpi{background:#f5f8f7;border:1px solid var(--line);border-radius:10px;padding:12px}.kpi b{display:block;font-size:18px;color:var(--green2);margin-top:4px}.kpi span{font-size:11px;color:var(--muted)}
+.plot{width:100%;height:420px;border:1px solid var(--line);border-radius:10px;background:white}
+.anim-info{font-size:12px;color:var(--muted)}
+.view-controls{margin-top:12px;padding:12px;border:1px solid var(--line);border-radius:10px;background:#f8faf9}.view-controls .row3{align-items:end}.view-controls input[type="range"]{padding:0;border:0;outline:0;accent-color:var(--green)}.view-value{font-size:11px;color:var(--green2);font-weight:700;margin-left:4px}
+.legend{font-size:11px;color:var(--muted);margin-top:7px}
+.status{padding:10px 12px;background:#f5f8f7;border-left:4px solid var(--green);font-size:12px;line-height:1.5}
+.small{font-size:10px;color:var(--muted)}.scroll{overflow:auto}
+@media(max-width:1100px){.grid{grid-template-columns:1fr}.kpis{grid-template-columns:repeat(3,1fr)}}@media(max-width:650px){.kpis{grid-template-columns:repeat(2,1fr)}.row,.row3{grid-template-columns:1fr}}
+
+/* 반응형 규칙은 항상 맨 끝에 다시 낸다 — CLAUDE.md §9.7.
+   1fr 트랙의 최소폭은 기본이 auto(=내용 크기)라, .scroll로 감싼 표가 안에 있어도
+   grid item(<section>/<main>) 자체는 안 줄어든다. minmax(0,1fr)로 강제로 줄인다. */
+@media(max-width:1100px){
+  .grid{grid-template-columns:minmax(0,1fr)}
+  .kpis{grid-template-columns:repeat(3,minmax(0,1fr))}
+}
+@media(max-width:650px){
+  .kpis{grid-template-columns:repeat(2,minmax(0,1fr))}
+  .row,.row3{grid-template-columns:minmax(0,1fr)}
+}
+</style>
+</head>
+<body>
+<header>
+<h1>강체 6자유도 마운트 진동 / 공진 해석</h1>
+<p>4개 마운트의 위치·강성 + 강체 질량·무게중심·관성모멘트를 입력하여 6DOF 고유진동수와 모드 결합을 계산합니다.</p>
+</header>
+
+<div class="wrap">
+<div class="grid">
+<section>
+<div class="card">
+<h2>1. 강체 입력</h2>
+<div class="row">
+<div><label>질량 m [kg]</label><input id="mass" type="number" value="1000" step="0.1"></div>
+<div><label>중력가속도 g [m/s²]</label><input id="grav" type="number" value="9.80665" step="0.00001"></div>
+</div>
+<h3>무게중심 CG [mm]</h3>
+<div class="row3">
+<div><label>X</label><input id="cgx" type="number" value="0" step="1"></div>
+<div><label>Y</label><input id="cgy" type="number" value="0" step="1"></div>
+<div><label>Z</label><input id="cgz" type="number" value="0" step="1"></div>
+</div>
+<h3>관성모멘트 [kg·m²]</h3>
+<div class="row3">
+<div><label>Ixx</label><input id="ixx" type="number" value="500" step="0.1"></div>
+<div><label>Iyy</label><input id="iyy" type="number" value="800" step="0.1"></div>
+<div><label>Izz</label><input id="izz" type="number" value="1000" step="0.1"></div>
+</div>
+<h3>관성곱 [kg·m²]</h3>
+<div class="row3">
+<div><label>Ixy</label><input id="ixy" type="number" value="0" step="0.1"></div>
+<div><label>Ixz</label><input id="ixz" type="number" value="0" step="0.1"></div>
+<div><label>Iyz</label><input id="iyz" type="number" value="0" step="0.1"></div>
+</div>
+<div class="note">관성행렬은 [Ixx -Ixy -Ixz; -Ixy Iyy -Iyz; -Ixz -Iyz Izz] 형태의 물리적 관성행렬을 사용합니다.</div>
+</div>
+
+<div class="card">
+<h2>2. 마운트 입력</h2>
+<div class="note">좌표는 CG 기준 [mm], 강성은 각 방향 [N/mm]입니다. 해석 내부에서는 각각 m, N/m로 자동 변환합니다. 회전은 작은 변위 선형화(roll=x, pitch=y, yaw=z) 기준입니다.</div>
+<div class="scroll">
+<table class="mount-table">
+<thead><tr><th>Mount</th><th>X [mm]</th><th>Y [mm]</th><th>Z [mm]</th><th>Kx [N/mm]</th><th>Ky [N/mm]</th><th>Kz [N/mm]</th></tr></thead>
+<tbody id="mountBody"></tbody>
+</table>
+</div>
+<div class="btns">
+<button class="secondary" onclick="setExample()">예제값</button>
+<button class="danger" onclick="resetData()">Data 초기화</button>
+<button class="primary" onclick="analyze()">공진 해석</button>
+</div>
+</div>
+
+<div class="card">
+<h2>3. CSV 입력 / 출력</h2>
+<div class="note">CSV는 <b>TYPE,NAME,X,Y,Z,KX,KY,KZ,VALUE</b> 형식을 지원합니다. 아래 템플릿을 다운로드하여 수정한 후 업로드할 수 있습니다.</div>
+<div class="btns">
+<input id="csvFile" type="file" accept=".csv,text/csv" style="max-width:260px">
+<button class="secondary" onclick="downloadTemplate()">CSV 템플릿</button>
+<button class="orange" onclick="exportAll()">해석 결과 CSV</button>
+</div>
+<div class="small">CSV 단위: CGX/CGY/CGZ 및 마운트 X/Y/Z = mm, KX/KY/KZ = N/mm. 관성모멘트/관성곱은 kg·m²입니다.</div>
+</div>
+
+<div class="card">
+<h2>4. 결과 저장 (서버)</h2>
+<div class="note">CSV 내보내기와 별개로, 이번 해석 조건과 결과를 서버(Supabase)에 저장해 나중에 다른 기기에서도 불러올 수 있습니다. 이 브라우저에서 저장한 기록만 "내 기록 불러오기"에 나타납니다(로컬에 저장된 익명 식별자 기준).</div>
+<div class="btns">
+<input id="saveLabel" type="text" placeholder="저장 이름 (예: 1호기 마운트안 A)" style="max-width:220px">
+<button class="primary" id="saveBtn" onclick="hd19SaveResult()" disabled>서버에 저장</button>
+<button class="secondary" onclick="hd19LoadResultList()">내 기록 불러오기</button>
+</div>
+<div id="hd19SaveStatus" class="small" style="margin-top:8px"></div>
+<div id="hd19SavedList" class="small" style="margin-top:8px"></div>
+</div>
+
+<div class="card">
+<h2>5. 결과 해설 (참고용 · 규칙 기반)</h2>
+<div class="note">아래는 계산된 고유진동수 대역을 통상적인 건설기계 가진원(엔진 회전수, 노면·주행 진동, 인체 민감대역)과 단순 비교한 <b>참고용 자동 해설</b>입니다. 실제 설계 판단의 근거로 쓰지 말고, 상세 검토가 필요한 모드를 먼저 짚어보는 용도로만 사용하세요.</div>
+<div id="hd19Interpretation" class="small">먼저 「2. 공진 해석」을 실행하세요.</div>
+<div class="btns" style="margin-top:10px">
+<button class="secondary" disabled title="API 키 협의 후 다음 단계에서 연동 예정">💬 AI 챗봇으로 물어보기 (준비중)</button>
+</div>
+</div>
+</section>
+
+<main>
+<div class="card">
+<h2>해석 결과</h2>
+<div id="status" class="status">입력값을 확인한 뒤 <b>공진 해석</b>을 누르세요.</div>
+<div class="kpis" style="margin-top:12px" id="kpis"></div>
+</div>
+
+<div class="card">
+<h2>6DOF 공진 주파수</h2>
+<div class="scroll">
+<table id="resultTable">
+<thead><tr><th>Mode</th><th>Natural Frequency [Hz]</th><th>ω [rad/s]</th><th>Dominant DOF</th><th>Dominant Component</th></tr></thead>
+<tbody></tbody>
+</table>
+</div>
+</div>
+
+<div class="card">
+<h2>모드별 마운트 변위 / 하중</h2>
+<div class="note">고유모드의 절대 크기는 임의이므로, 각 모드에서 M1~M4 중 최대 합성 마운트 변위가 <b>1.000 mm</b>가 되도록 스케일링한 모달 결과입니다. 하중은 각 방향에서 <b>F = K·δ</b>로 계산합니다. 실제 운전하중/강제응답과는 구분해야 합니다.</div>
+<div class="scroll" style="margin-top:10px">
+<table id="mountResponseTable">
+<thead>
+<tr>
+<th>Mode</th><th>Freq. [Hz]</th><th>Mount</th>
+<th>ΔX [mm]</th><th>ΔY [mm]</th><th>ΔZ [mm]</th><th>|Δ| [mm]</th>
+<th>Fx [N]</th><th>Fy [N]</th><th>Fz [N]</th><th>|F| [N]</th>
+</tr>
+</thead>
+<tbody></tbody>
+</table>
+</div>
+</div>
+
+<div class="card">
+<h2>공진 주파수별 3D 모드 애니메이션</h2>
+<div class="row3">
+<div>
+<label>애니메이션 모드</label>
+<select id="animMode"></select>
+</div>
+<div>
+<label>View</label>
+<select id="animView" onchange="refreshAnimationView()">
+<option value="front" selected>정면 View (YZ 평면)</option>
+<option value="side">측면 View (XZ 평면)</option>
+<option value="top">Top View (XY 평면)</option>
+<option value="iso">Iso View</option>
+</select>
+</div>
+<div>
+<label>재생 속도</label>
+<select id="animSpeed">
+<option value="0.2">1/5 ×</option>
+<option value="0.1">1/10 ×</option>
+<option value="0.05">1/20 ×</option>
+<option value="0.02">1/50 ×</option>
+<option value="0.01" selected>1/100 ×</option>
+</select>
+</div>
+</div>
+<div id="isoViewControls" class="view-controls">
+  <div class="row3">
+    <div><label>Iso View X축 회전 <span id="viewRxVal" class="view-value">15°</span></label><input id="viewRx" type="range" min="-180" max="180" value="15" step="1" oninput="updateViewRotation()"></div>
+    <div><label>Iso View Y축 회전 <span id="viewRyVal" class="view-value">10°</span></label><input id="viewRy" type="range" min="-180" max="180" value="10" step="1" oninput="updateViewRotation()"></div>
+    <div><label>Iso View Z축 회전 <span id="viewRzVal" class="view-value">15°</span></label><input id="viewRz" type="range" min="-180" max="180" value="15" step="1" oninput="updateViewRotation()"></div>
+  </div>
+  <div class="btns" style="margin-top:10px">
+    <button class="secondary" onclick="resetIsoView()">Iso 시점 초기화</button>
+  </div>
+  <div class="small">Iso View에서만 적용됩니다. X/Y/Z 슬라이더로 카메라 시점을 회전하며, 진동 모드의 roll/pitch/yaw 회전과는 독립적으로 동작합니다.</div>
+</div>
+<div class="btns">
+<button class="primary" onclick="startAnimation()">▶ 재생</button>
+<button class="secondary" onclick="stopAnimation()">■ 정지</button>
+</div>
+<canvas id="animCanvas" class="plot" style="height:520px;margin-top:10px"></canvas>
+<div class="legend">강체는 3가지 기본 도형만 사용해 단순화합니다: 엔진 본체(Block + Cylinder Head)=직육면체, Oil Pan=사다리꼴 프리즘, FWH=원통(+X 방향, 엔진 본체 오른쪽 부착). 정면(YZ), 측면(XZ), Top(XY), Iso View를 선택할 수 있으며, Iso View에서는 X/Y/Z축 시점 회전이 가능합니다.</div>
+</div>
+
+<div class="card">
+<h2>모드 형상 / 주파수 그래프</h2>
+<canvas id="modeCanvas" class="plot"></canvas>
+<div class="legend">각 막대는 정규화된 6DOF 모드 형상 성분입니다. DOF 순서는 x, y, z, roll, pitch, yaw입니다.</div>
+</div>
+
+<div class="card">
+<h2>Mode Coupling Matrix</h2>
+<div class="scroll"><table id="couplingTable"></table></div>
+<div class="legend">Coupling %는 각 고유모드의 정규화된 6DOF 벡터 간 겹침 정도를 표시합니다. 대각선은 100%이며, 비대각 성분은 모드 간 형상 유사도를 의미합니다.</div>
+</div>
+
+<div class="card">
+<h2>모드별 6DOF 성분</h2>
+<div class="scroll"><table id="shapeTable"></table></div>
+</div>
+</main>
+</div>
+</div>
+
+<script>
+const DOF=["x","y","z","roll (X)","pitch (Y)","yaw (Z)"];
+const mountBody=document.getElementById("mountBody");
+for(let i=1;i<=4;i++){
+  const tr=document.createElement("tr");
+  tr.innerHTML=`<td>M${i}</td>
+  <td><input id="m${i}x" type="number" value="${i===1||i===2?-700:700}" step="1"></td>
+  <td><input id="m${i}y" type="number" value="${i===1||i===4?-450:450}" step="1"></td>
+  <td><input id="m${i}z" type="number" value="0" step="1"></td>
+  <td><input id="m${i}kx" type="number" value="180" step="1"></td>
+  <td><input id="m${i}ky" type="number" value="180" step="1"></td>
+  <td><input id="m${i}kz" type="number" value="300" step="1"></td>`;
+  mountBody.appendChild(tr);
+}
+function v(id){return parseFloat(document.getElementById(id).value)||0}
+function mmToM(x){return x/1000}
+function nPerMmToNPerM(x){return x*1000}
+function mountPositionM(n){return [mmToM(v(`m${n}x`)),mmToM(v(`m${n}y`)),mmToM(v(`m${n}z`))]}
+function mountStiffnessNPerMm(n){return [v(`m${n}kx`),v(`m${n}ky`),v(`m${n}kz`)]}
+function mountBMatrix(r){
+  const S=crossMatrix(r);
+  return [[1,0,0,-S[0][0],-S[0][1],-S[0][2]],
+          [0,1,0,-S[1][0],-S[1][1],-S[1][2]],
+          [0,0,1,-S[2][0],-S[2][1],-S[2][2]]];
+}
+function matVec(A,x){return A.map(r=>r.reduce((s,a,j)=>s+a*x[j],0))}
+
+function resetData(){
+  // 강체 데이터 초기화
+  document.getElementById("mass").value="";
+  document.getElementById("grav").value="9.80665";
+  ["cgx","cgy","cgz","ixx","iyy","izz","ixy","ixz","iyz"].forEach(id=>{
+    document.getElementById(id).value="";
+  });
+
+  // 4개 마운트 데이터 초기화
+  for(let i=1;i<=4;i++){
+    ["x","y","z","kx","ky","kz"].forEach(k=>{
+      document.getElementById(`m${i}${k}`).value="";
+    });
+  }
+
+  // 결과 초기화
+  document.querySelector("#resultTable tbody").innerHTML="";
+  document.getElementById("kpis").innerHTML="";
+  document.getElementById("couplingTable").innerHTML="";
+  document.getElementById("shapeTable").innerHTML="";
+  const mrt=document.querySelector("#mountResponseTable tbody"); if(mrt)mrt.innerHTML="";
+  document.getElementById("status").innerHTML="입력 데이터가 초기화되었습니다. 강체 및 4개 마운트 데이터를 입력한 후 <b>공진 해석</b>을 실행하세요.";
+
+  window.lastModes=null;
+  stopAnimation();
+
+  const sel=document.getElementById("animMode");
+  if(sel)sel.innerHTML="";
+
+  const c=document.getElementById("animCanvas");
+  if(c){
+    const ctx=c.getContext("2d");
+    ctx.clearRect(0,0,c.width,c.height);
+  }
+  const mc=document.getElementById("modeCanvas");
+  if(mc){
+    const ctx=mc.getContext("2d");
+    ctx.clearRect(0,0,mc.width,mc.height);
+  }
+}
+
+function setExample(){
+  document.getElementById("mass").value=1000;
+  ["cgx","cgy","cgz"].forEach(id=>document.getElementById(id).value=0);
+  document.getElementById("ixx").value=500;document.getElementById("iyy").value=800;document.getElementById("izz").value=1000;
+  ["ixy","ixz","iyz"].forEach(id=>document.getElementById(id).value=0);
+  for(let i=1;i<=4;i++){
+    document.getElementById(`m${i}x`).value=(i===1||i===2)?-700:700;
+    document.getElementById(`m${i}y`).value=(i===1||i===4)?-450:450;
+    document.getElementById(`m${i}z`).value=0;
+    document.getElementById(`m${i}kx`).value=180;
+    document.getElementById(`m${i}ky`).value=180;
+    document.getElementById(`m${i}kz`).value=300;
+  }
+}
+function crossMatrix(r){return [[0,-r[2],r[1]],[r[2],0,-r[0]],[-r[1],r[0],0]]}
+function matMul(A,B){let m=A.length,n=B[0].length,p=B.length,C=Array.from({length:m},()=>Array(n).fill(0));for(let i=0;i<m;i++)for(let k=0;k<p;k++)for(let j=0;j<n;j++)C[i][j]+=A[i][k]*B[k][j];return C}
+function matT(A){return A[0].map((_,j)=>A.map(r=>r[j]))}
+function addTo(A,B){for(let i=0;i<A.length;i++)for(let j=0;j<A[0].length;j++)A[i][j]+=B[i][j]}
+function diag3(a,b,c){return [[a,0,0],[0,b,0],[0,0,c]]}
+function massMatrix(){
+  const m=v("mass"), I=[[v("ixx"),-v("ixy"),-v("ixz")],[-v("ixy"),v("iyy"),-v("iyz")],[-v("ixz"),-v("iyz"),v("izz")]];
+  let M=Array.from({length:6},()=>Array(6).fill(0));
+  for(let i=0;i<3;i++)M[i][i]=m;
+  for(let i=0;i<3;i++)for(let j=0;j<3;j++)M[i+3][j+3]=I[i][j];
+  return M;
+}
+function stiffnessMatrix(){
+  let K=Array.from({length:6},()=>Array(6).fill(0));
+  for(let n=1;n<=4;n++){
+    const r=mountPositionM(n);
+    const B=mountBMatrix(r);
+    // 화면 입력 N/mm → 해석 내부 N/m
+    const D=diag3(nPerMmToNPerM(v(`m${n}kx`)),nPerMmToNPerM(v(`m${n}ky`)),nPerMmToNPerM(v(`m${n}kz`)));
+    addTo(K,matMul(matT(B),matMul(D,B)));
+  }
+  return K;
+}
+// Jacobi eigensolver for real symmetric matrix
+function jacobi(A){
+  const n=A.length,Q=Array.from({length:n},(_,i)=>Array.from({length:n},(_,j)=>i===j?1:0));
+  for(let iter=0;iter<200;iter++){
+    let p=0,q=1,max=0;
+    for(let i=0;i<n;i++)for(let j=i+1;j<n;j++)if(Math.abs(A[i][j])>max){max=Math.abs(A[i][j]);p=i;q=j}
+    if(max<1e-10)break;
+    const phi=.5*Math.atan2(2*A[p][q],A[q][q]-A[p][p]),c=Math.cos(phi),s=Math.sin(phi);
+    const app=A[p][p],aqq=A[q][q],apq=A[p][q];
+    A[p][p]=c*c*app-2*s*c*apq+s*s*aqq;
+    A[q][q]=s*s*app+2*s*c*apq+c*c*aqq;
+    A[p][q]=A[q][p]=0;
+    for(let k=0;k<n;k++)if(k!==p&&k!==q){
+      const akp=A[k][p],akq=A[k][q];
+      A[k][p]=A[p][k]=c*akp-s*akq;
+      A[k][q]=A[q][k]=s*akp+c*akq;
+    }
+    for(let k=0;k<n;k++){
+      const qkp=Q[k][p],qkq=Q[k][q];
+      Q[k][p]=c*qkp-s*qkq;Q[k][q]=s*qkp+c*qkq;
+    }
+  }
+  const vals=A.map((r,i)=>r[i]);
+  const idx=vals.map((x,i)=>i).sort((a,b)=>vals[a]-vals[b]);
+  return {values:idx.map(i=>vals[i]),vectors:Q.map(r=>idx.map(i=>r[i]))};
+}
+// Cholesky M=L L^T, transform M^-1/2 K M^-1/2 using L^-1 K L^-T
+function cholesky(A){
+  const n=A.length,L=Array.from({length:n},()=>Array(n).fill(0));
+  for(let i=0;i<n;i++)for(let j=0;j<=i;j++){
+    let s=A[i][j];for(let k=0;k<j;k++)s-=L[i][k]*L[j][k];
+    if(i===j)L[i][j]=Math.sqrt(Math.max(s,1e-14)); else L[i][j]=s/L[j][j];
+  } return L;
+}
+function invertLower(L){
+  const n=L.length,X=Array.from({length:n},()=>Array(n).fill(0));
+  for(let j=0;j<n;j++)for(let i=j;i<n;i++){
+    let s=(i===j?1:0);for(let k=j;k<i;k++)s-=L[i][k]*X[k][j];X[i][j]=s/L[i][i];
+  }return X;
+}
+function analyze(){
+  try{
+    const M=massMatrix(),K=stiffnessMatrix(),L=cholesky(M),Li=invertLower(L);
+    const A=matMul(Li,matMul(K,matT(Li)));
+    const ev=jacobi(A);
+    const modes=[];
+    for(let j=0;j<6;j++){
+      const y=ev.vectors.map(r=>r[j]);
+      // physical mode phi = L^-T y
+      const phi=Array(6).fill(0);
+      for(let i=0;i<6;i++)for(let k=i;k<6;k++)phi[i]+=Li[k][i]*y[k];
+      const mx=Math.max(...phi.map(Math.abs));
+      let norm=phi.map(x=>x/mx);
+      // 모드 형상의 부호는 임의이므로, 지배 DOF가 항상 양수가 되도록 위상을 통일
+      const dominant=norm.reduce((a,x,i)=>Math.abs(x)>Math.abs(norm[a])?i:a,0);
+      if(norm[dominant] < 0) norm=norm.map(x=>-x);
+      const lambda=Math.max(ev.values[j],0), w=Math.sqrt(lambda), f=w/(2*Math.PI);
+      modes.push({lambda,w,f,vec:norm,dominant,rawPhi:phi.slice()});
+    }
+    render(modes);
+    window.lastModes=modes;
+    document.getElementById("status").innerHTML=`해석 완료: <b>6개 고유모드</b>와 모드별 M1~M4 마운트 변위/하중을 계산했습니다. 입력 좌표(mm)와 강성(N/mm)은 내부에서 SI 단위로 변환하여 해석했습니다.`;
+    if(window.hd19OnAnalyze) window.hd19OnAnalyze(modes);
+  }catch(e){document.getElementById("status").innerHTML=`<span style="color:#b43b3b"><b>오류:</b> ${e.message}</span>`}
+}
+
+function computeMountResponses(mode){
+  const raw=mode.rawPhi || mode.vec;
+  const rawDisp=[];
+  let maxResultant=0;
+  for(let n=1;n<=4;n++){
+    const uM=matVec(mountBMatrix(mountPositionM(n)),raw);
+    const mag=Math.hypot(...uM);
+    rawDisp.push(uM);
+    maxResultant=Math.max(maxResultant,mag);
+  }
+  // 각 모드에서 최대 마운트 합성변위 = 1 mm가 되도록 스케일
+  const scale=maxResultant>1e-20 ? 0.001/maxResultant : 0;
+  return rawDisp.map((uM,i)=>{
+    const n=i+1;
+    const dispMm=uM.map(x=>x*scale*1000);
+    const k=mountStiffnessNPerMm(n);
+    const forceN=dispMm.map((d,j)=>d*k[j]);
+    return {
+      mount:`M${n}`,
+      dx:dispMm[0],dy:dispMm[1],dz:dispMm[2],
+      dmag:Math.hypot(...dispMm),
+      fx:forceN[0],fy:forceN[1],fz:forceN[2],
+      fmag:Math.hypot(...forceN)
+    };
+  });
+}
+function renderMountResponses(modes){
+  const tb=document.querySelector("#mountResponseTable tbody");
+  if(!tb)return;
+  tb.innerHTML="";
+  modes.forEach((m,mi)=>{
+    const rows=computeMountResponses(m);
+    rows.forEach(r=>{
+      tb.innerHTML+=`<tr>
+        <td>${mi+1} (${DOF[m.dominant]})</td><td>${m.f.toFixed(3)}</td><td><b>${r.mount}</b></td>
+        <td>${r.dx.toFixed(4)}</td><td>${r.dy.toFixed(4)}</td><td>${r.dz.toFixed(4)}</td><td><b>${r.dmag.toFixed(4)}</b></td>
+        <td>${r.fx.toFixed(2)}</td><td>${r.fy.toFixed(2)}</td><td>${r.fz.toFixed(2)}</td><td><b>${r.fmag.toFixed(2)}</b></td>
+      </tr>`;
+    });
+  });
+}
+
+function render(modes){
+  const tb=document.querySelector("#resultTable tbody");tb.innerHTML="";
+  modes.forEach((m,i)=>tb.innerHTML+=`<tr><td><b>${DOF[m.dominant]}</b></td><td>${m.f.toFixed(3)}</td><td>${m.w.toFixed(3)}</td><td>${DOF[m.dominant]}</td><td>${m.vec[m.dominant].toFixed(3)}</td></tr>`);
+  const kp=document.getElementById("kpis");kp.innerHTML=modes.map((m,i)=>`<div class="kpi"><span>${DOF[m.dominant]} mode</span><b>${m.f.toFixed(2)} Hz</b></div>`).join("");
+  let st="<tr><th>Mode</th>"+DOF.map(x=>`<th>${x}</th>`).join("")+"</tr>";
+  modes.forEach((m,i)=>st+=`<tr><td><b>${DOF[m.dominant]}</b><br><span class="small">${m.f.toFixed(2)} Hz</span></td>`+m.vec.map(x=>`<td>${x.toFixed(4)}</td>`).join("")+"</tr>");
+  document.getElementById("shapeTable").innerHTML=st;
+  let ct="<tr><th>Coupling %</th>"+modes.map(m=>`<th>${DOF[m.dominant]}</th>`).join("")+"</tr>";
+  for(let i=0;i<6;i++){ct+=`<tr><td><b>${DOF[modes[i].dominant]}</b></td>`;for(let j=0;j<6;j++){let dot=0,a=0,b=0;for(let k=0;k<6;k++){dot+=modes[i].vec[k]*modes[j].vec[k];a+=modes[i].vec[k]**2;b+=modes[j].vec[k]**2}let c=100*Math.abs(dot)/Math.sqrt(a*b);ct+=`<td>${c.toFixed(1)}%</td>`}ct+="</tr>"}document.getElementById("couplingTable").innerHTML=ct;
+  renderMountResponses(modes);
+  drawModes(modes);
+  initAnimSelect();
+  draw3DAnimation(modes[0],0,0.01);
+}
+function drawModes(modes){
+  const c=document.getElementById("modeCanvas"),d=devicePixelRatio||1,r=c.getBoundingClientRect();c.width=r.width*d;c.height=r.height*d;
+  const x=c.getContext("2d");x.scale(d,d);const W=r.width,H=r.height;x.clearRect(0,0,W,H);
+  const left=55,right=20,top=25,bottom=55,gw=W-left-right,gh=H-top-bottom;
+  const max=Math.max(...modes.flatMap(m=>m.vec.map(Math.abs)),1);
+  x.strokeStyle="#d9e2df";x.lineWidth=1;
+  for(let i=0;i<=4;i++){let yy=top+gh*i/4;x.beginPath();x.moveTo(left,yy);x.lineTo(W-right,yy);x.stroke();x.fillStyle="#66736f";x.font="10px Nanum Gothic, Arial";x.fillText((max*(1-i/2)).toFixed(1),8,yy+3)}
+  const bw=gw/(6*6);
+  modes.forEach((m,mi)=>{const cx=left+(mi+.5)*gw/6; x.fillStyle="#145c4a";x.font="bold 11px Nanum Gothic, Arial";x.textAlign="center";x.fillText(DOF[m.dominant],cx,H-30);x.fillStyle="#66736f";x.font="10px Nanum Gothic, Arial";x.fillText(m.f.toFixed(2)+" Hz",cx,H-15);
+    DOF.forEach((dof,di)=>{const val=m.vec[di];const xx=left+mi*gw/6+(di+.5)*gw/36;const zero=top+gh/2;const yy=zero-val/max*gh/2;x.fillStyle=(val>=0?"#e57b24":"#1e5b91");x.fillRect(xx-4,Math.min(zero,yy),8,Math.abs(yy-zero));});
+  });
+  x.strokeStyle="#17211f";x.beginPath();x.moveTo(left,top+gh/2);x.lineTo(W-right,top+gh/2);x.stroke();x.textAlign="left";
+  x.fillStyle="#66736f";x.font="10px Nanum Gothic, Arial";x.fillText("+ normalized",left,12);x.fillText("- normalized",left,H-60);
+}
+function parseCSV(text){
+  const lines=text.replace(/^\uFEFF/,"").split(/\r?\n/).filter(x=>x.trim());
+  if(!lines.length)return;
+  const rows=lines.map(line=>line.split(",").map(x=>x.trim()));
+  const head=rows[0].map(x=>x.toUpperCase());
+  const idx=n=>head.indexOf(n);
+  rows.slice(1).forEach(r=>{
+    const type=(r[idx("TYPE")]||"").toUpperCase(), name=(r[idx("NAME")]||"").toUpperCase(), value=parseFloat(r[idx("VALUE")]);
+    if(type==="BODY" && name){const map={MASS:"mass",CGX:"cgx",CGY:"cgy",CGZ:"cgz",IXX:"ixx",IYY:"iyy",IZZ:"izz",IXY:"ixy",IXZ:"ixz",IYZ:"iyz"};if(map[name]&&Number.isFinite(value))document.getElementById(map[name]).value=value}
+    if(type==="MOUNT" && /^M[1-4]$/.test(name)){
+      const aliases={X:["X_MM","X"],Y:["Y_MM","Y"],Z:["Z_MM","Z"],KX:["KX_N_PER_MM","KX"],KY:["KY_N_PER_MM","KY"],KZ:["KZ_N_PER_MM","KZ"]};
+      Object.entries(aliases).forEach(([k,names])=>{let ii=-1;for(const nm of names){ii=idx(nm);if(ii>=0)break;}if(ii>=0&&r[ii]!=="")document.getElementById(name.toLowerCase()+k.toLowerCase()).value=parseFloat(r[ii]);});
+    }
+  });
+  document.getElementById("status").textContent="CSV 입력값을 반영했습니다. 공진 해석을 실행하세요.";
+}
+document.getElementById("csvFile").addEventListener("change",e=>{const f=e.target.files[0];if(!f)return;const rd=new FileReader();rd.onload=()=>parseCSV(rd.result);rd.readAsText(f,"UTF-8")});
+function csvCell(x){return `"${String(x).replace(/"/g,'""')}"`}
+function download(name,text){const a=document.createElement("a");a.href=URL.createObjectURL(new Blob(["\uFEFF"+text],{type:"text/csv;charset=utf-8"}));a.download=name;a.click();setTimeout(()=>URL.revokeObjectURL(a.href),1000)}
+function downloadTemplate(){
+ let s="TYPE,NAME,X_MM,Y_MM,Z_MM,KX_N_PER_MM,KY_N_PER_MM,KZ_N_PER_MM,VALUE\n";
+ [["BODY","MASS",1000],["BODY","CGX",0],["BODY","CGY",0],["BODY","CGZ",0],["BODY","IXX",500],["BODY","IYY",800],["BODY","IZZ",1000],["BODY","IXY",0],["BODY","IXZ",0],["BODY","IYZ",0]].forEach(a=>s+=`${a[0]},${a[1]},,,,,,,,${a[2]}\n`);
+ for(let i=1;i<=4;i++)s+=`MOUNT,M${i},${v(`m${i}x`)},${v(`m${i}y`)},${v(`m${i}z`)},${v(`m${i}kx`)},${v(`m${i}ky`)},${v(`m${i}kz`)},\n`;
+ download("6dof_mount_input_template.csv",s);
+}
+function exportAll(){
+ if(!window.lastModes){alert("먼저 공진 해석을 실행하세요.");return}
+ let s="SECTION,MODE,FREQUENCY_HZ,OMEGA_RAD_S,DOMINANT_DOF,X_NORM,Y_NORM,Z_NORM,ROLL_NORM,PITCH_NORM,YAW_NORM\n";
+ window.lastModes.forEach((m,i)=>s+=`MODE,${i+1},${m.f},${m.w},${DOF[m.dominant]},${m.vec.join(",")}\n`);
+
+ s+="\nMOUNT_MODAL_RESPONSE (normalized so max mount resultant displacement in each mode = 1.000 mm)\n";
+ s+="SECTION,MODE,FREQUENCY_HZ,MOUNT,DX_MM,DY_MM,DZ_MM,D_RESULTANT_MM,FX_N,FY_N,FZ_N,F_RESULTANT_N,KX_N_PER_MM,KY_N_PER_MM,KZ_N_PER_MM\n";
+ window.lastModes.forEach((m,i)=>{
+   computeMountResponses(m).forEach((r,j)=>{
+     const k=mountStiffnessNPerMm(j+1);
+     s+=`MOUNT_RESPONSE,${i+1},${m.f},${r.mount},${r.dx},${r.dy},${r.dz},${r.dmag},${r.fx},${r.fy},${r.fz},${r.fmag},${k[0]},${k[1]},${k[2]}\n`;
+   });
+ });
+
+ s+="\nCOUPLING_PERCENT,MODE,"+window.lastModes.map(m=>DOF[m.dominant]).join(",")+"\n";
+ window.lastModes.forEach((m,i)=>{let vals=window.lastModes.map(n=>{let dot=0,a=0,b=0;for(let k=0;k<6;k++){dot+=m.vec[k]*n.vec[k];a+=m.vec[k]**2;b+=n.vec[k]**2}return (100*Math.abs(dot)/Math.sqrt(a*b)).toFixed(4)});s+=`COUPLING,${DOF[m.dominant]},${vals.join(",")}\n`});
+
+ s+="\nINPUT_UNITS\n";
+ s+="CG_COORDINATES,mm\nMOUNT_COORDINATES,mm\nMOUNT_STIFFNESS,N/mm\nINERTIA,kg*m^2\n";
+ download("6dof_mount_resonance_and_mount_response.csv",s);
+}
+
+let animRAF=null, animStart=0;
+function initAnimSelect(){
+  const sel=document.getElementById("animMode");
+  if(!sel || !window.lastModes)return;
+  sel.innerHTML="";
+  window.lastModes.forEach((m,i)=>{
+    const o=document.createElement("option");
+    o.value=i;
+    o.textContent=`${i+1}. ${DOF[m.dominant]} — ${m.f.toFixed(3)} Hz`;
+    sel.appendChild(o);
+  });
+}
+function stopAnimation(){
+  if(animRAF){cancelAnimationFrame(animRAF);animRAF=null;}
+}
+function startAnimation(){
+  if(!window.lastModes){alert("먼저 공진 해석을 실행하세요.");return;}
+  stopAnimation();
+  animStart=performance.now();
+  const sel=document.getElementById("animMode");
+  const speed=parseFloat(document.getElementById("animSpeed").value)||1;
+  const modeIndex=parseInt(sel.value||0);
+  const mode=window.lastModes[modeIndex];
+  const draw=now=>{
+    const t=(now-animStart)/1000;
+    draw3DAnimation(mode, t, speed);
+    animRAF=requestAnimationFrame(draw);
+  };
+  animRAF=requestAnimationFrame(draw);
+}
+function rotXYZ(p,rx,ry,rz){
+  let [x,y,z]=p;
+  let cy=Math.cos(rx),sy=Math.sin(rx);
+  [y,z]=[y*cy-z*sy,y*sy+z*cy];
+  let cp=Math.cos(ry),sp=Math.sin(ry);
+  [x,z]=[x*cp+z*sp,-x*sp+z*cp];
+  let cz=Math.cos(rz),sz=Math.sin(rz);
+  [x,y]=[x*cz-y*sz,x*sz+y*cz];
+  return [x,y,z];
+}
+function getIsoViewAngles(){
+  const deg=Math.PI/180;
+  return [
+    (parseFloat(document.getElementById("viewRx")?.value)||0)*deg,
+    (parseFloat(document.getElementById("viewRy")?.value)||0)*deg,
+    (parseFloat(document.getElementById("viewRz")?.value)||0)*deg
+  ];
+}
+function project3D(p,W,H,scale){
+  const view=document.getElementById("animView")?.value || "iso";
+  let [x,y,z]=p;
+  let u,v,depth=0;
+  if(view==="front"){
+    u=y; v=z; depth=x;
+  }else if(view==="side"){
+    u=x; v=z; depth=y;
+  }else if(view==="top"){
+    u=x; v=y; depth=z;
+  }else{
+    const [vrx,vry,vrz]=getIsoViewAngles();
+    [x,y,z]=rotXYZ([x,y,z],vrx,vry,vrz);
+    u=x; v=z; depth=y;
+  }
+  return [W/2+u*scale,H/2-v*scale,depth];
+}
+function updateViewRotation(){
+  const ids=["Rx","Ry","Rz"];
+  ids.forEach(k=>{
+    const el=document.getElementById("view"+k), lab=document.getElementById("view"+k+"Val");
+    if(el&&lab) lab.textContent=`${parseFloat(el.value)||0}°`;
+  });
+  refreshAnimationView();
+}
+function resetIsoView(){
+  document.getElementById("viewRx").value=15;
+  document.getElementById("viewRy").value=10;
+  document.getElementById("viewRz").value=15;
+  updateViewRotation();
+}
+function refreshAnimationView(){
+  const iso=document.getElementById("animView")?.value==="iso";
+  const box=document.getElementById("isoViewControls");
+  if(box){box.style.opacity=iso?"1":"0.45";box.style.pointerEvents=iso?"auto":"none";}
+  if(window.lastModes){
+    const sel=document.getElementById("animMode");
+    const idx=parseInt(sel?.value||0);
+    const mode=window.lastModes[idx];
+    if(mode) draw3DAnimation(mode,0,parseFloat(document.getElementById("animSpeed")?.value||0.01));
+  }
+}
+
+function draw3DAnimation(mode,t,speed){
+  const c=document.getElementById("animCanvas"),d=devicePixelRatio||1,r=c.getBoundingClientRect();
+  c.width=r.width*d;c.height=r.height*d;
+  const ctx=c.getContext("2d");ctx.setTransform(d,0,0,d,0,0);
+  const W=r.width,H=r.height;ctx.clearRect(0,0,W,H);
+
+  const phase=2*Math.PI*mode.f*t*speed;
+  const q=Math.sin(phase);
+  const ampT=0.12;
+  const ampR=12*Math.PI/180;
+  const tx=mode.vec[0]*ampT*q, ty=mode.vec[1]*ampT*q, tz=mode.vec[2]*ampT*q;
+  const rx=mode.vec[3]*ampR*q, ry=mode.vec[4]*ampR*q, rz=mode.vec[5]*ampR*q;
+  const SCALE=Math.min(235,Math.max(150,W/5.5));
+
+  function deformPoint(p){
+    const rr=rotXYZ(p,rx,ry,rz);
+    return [rr[0]+tx,rr[1]+ty,rr[2]+tz];
+  }
+  const edges=[[0,1],[1,2],[2,3],[3,0],[4,5],[5,6],[6,7],[7,4],[0,4],[1,5],[2,6],[3,7]];
+  const faces=[[0,1,2,3],[4,5,6,7],[0,1,5,4],[2,3,7,6],[1,2,6,5],[0,3,7,4]];
+
+  function boxVertices(size,center=[0,0,0]){
+    const [hx,hy,hz]=size.map(v=>v/2),[cx,cy,cz]=center;
+    return [
+      [cx-hx,cy-hy,cz-hz],[cx+hx,cy-hy,cz-hz],[cx+hx,cy+hy,cz-hz],[cx-hx,cy+hy,cz-hz],
+      [cx-hx,cy-hy,cz+hz],[cx+hx,cy-hy,cz+hz],[cx+hx,cy+hy,cz+hz],[cx-hx,cy+hy,cz+hz]
+    ];
+  }
+  // X 방향으로 길게 뻗는 사다리꼴 프리즘: 위쪽 폭이 넓고 아래쪽 폭이 좁은 Oil Pan
+  function trapezoidPrismVertices(length,topWidth,bottomWidth,height,center=[0,0,0]){
+    const [cx,cy,cz]=center,hx=length/2,hz=height/2,yt=topWidth/2,yb=bottomWidth/2;
+    return [
+      [cx-hx,cy-yb,cz-hz],[cx+hx,cy-yb,cz-hz],[cx+hx,cy+yb,cz-hz],[cx-hx,cy+yb,cz-hz],
+      [cx-hx,cy-yt,cz+hz],[cx+hx,cy-yt,cz+hz],[cx+hx,cy+yt,cz+hz],[cx-hx,cy+yt,cz+hz]
+    ];
+  }
+  function drawPolyhedron(vertices,deformed,reference,fill,stroke){
+    const world=deformed?vertices.map(deformPoint):vertices;
+    const pp=world.map(p=>project3D(p,W,H,SCALE));
+    if(reference){
+      ctx.save();ctx.setLineDash([6,5]);ctx.strokeStyle="#aab8b4";ctx.lineWidth=1.2;
+      edges.forEach(e=>{ctx.beginPath();ctx.moveTo(pp[e[0]][0],pp[e[0]][1]);ctx.lineTo(pp[e[1]][0],pp[e[1]][1]);ctx.stroke();});
+      ctx.restore();return;
+    }
+    const jobs=faces.map(face=>({pts:face.map(i=>pp[i]),depth:face.reduce((a,i)=>a+pp[i][2],0)/face.length})).sort((a,b)=>a.depth-b.depth);
+    jobs.forEach(j=>{ctx.beginPath();ctx.moveTo(j.pts[0][0],j.pts[0][1]);for(let i=1;i<j.pts.length;i++)ctx.lineTo(j.pts[i][0],j.pts[i][1]);ctx.closePath();ctx.fillStyle=fill;ctx.fill();ctx.strokeStyle=stroke;ctx.lineWidth=1.8;ctx.stroke();});
+  }
+
+  // 원통의 축은 X축. FWH를 실제 두께가 있는 원통으로 표현.
+  function cylinderMesh(center,length,radius,segments=40,deformed=false){
+    const [cx,cy,cz]=center,h=length/2;
+    const a=[],b=[];
+    for(let i=0;i<segments;i++){
+      const ang=2*Math.PI*i/segments;
+      a.push([cx-h,cy+radius*Math.cos(ang),cz+radius*Math.sin(ang)]);
+      b.push([cx+h,cy+radius*Math.cos(ang),cz+radius*Math.sin(ang)]);
+    }
+    const tr=p=>project3D(deformed?deformPoint(p):p,W,H,SCALE);
+    return {a:a.map(tr),b:b.map(tr),segments};
+  }
+  function drawCylinder(mesh,reference=false){
+    const {a,b,segments}=mesh;
+    ctx.save();
+    if(reference){ctx.setLineDash([6,5]);ctx.strokeStyle="#aab8b4";ctx.lineWidth=1.2;}
+    else{ctx.strokeStyle="#53635f";ctx.lineWidth=2.2;ctx.fillStyle="#66736f20";}
+    // 측면은 가까운/먼 원의 대응점을 연결해 원통 느낌만 간결하게 표현
+    if(!reference){
+      ctx.beginPath();ctx.moveTo(a[0][0],a[0][1]);for(let i=1;i<segments;i++)ctx.lineTo(a[i][0],a[i][1]);ctx.closePath();ctx.fill();
+      ctx.beginPath();ctx.moveTo(b[0][0],b[0][1]);for(let i=1;i<segments;i++)ctx.lineTo(b[i][0],b[i][1]);ctx.closePath();ctx.fill();
+    }
+    [a,b].forEach(loop=>{ctx.beginPath();ctx.moveTo(loop[0][0],loop[0][1]);for(let i=1;i<segments;i++)ctx.lineTo(loop[i][0],loop[i][1]);ctx.closePath();ctx.stroke();});
+    [0,Math.floor(segments/4),Math.floor(segments/2),Math.floor(3*segments/4)].forEach(i=>{ctx.beginPath();ctx.moveTo(a[i][0],a[i][1]);ctx.lineTo(b[i][0],b[i][1]);ctx.stroke();});
+    ctx.restore();
+  }
+
+  // ===== 엔진 단순화 모델: 딱 3종 도형 =====
+  // 1) 엔진 본체(Block + Cyl Head): 직육면체
+  const body=boxVertices([1.48,0.82,0.82],[0.02,0,0.06]);
+  // 2) Oil Pan: 사다리꼴 프리즘
+  const oilPan=trapezoidPrismVertices(1.12,0.66,0.40,0.30,[0.02,0,-0.50]);
+  // 3) FWH: X축 방향 원통
+  const fwhCenter=[0.88,0,-0.02],fwhLength=0.24,fwhRadius=0.47;
+
+  // 기준 형상
+  drawPolyhedron(body,false,true,"","#aab8b4");
+  drawPolyhedron(oilPan,false,true,"","#aab8b4");
+  drawCylinder(cylinderMesh(fwhCenter,fwhLength,fwhRadius,44,false),true);
+
+  // 진동 형상
+  drawPolyhedron(body,true,false,"#145c4a24","#145c4a");
+  drawPolyhedron(oilPan,true,false,"#e57b2425","#9a5a20");
+  drawCylinder(cylinderMesh(fwhCenter,fwhLength,fwhRadius,44,true),false);
+
+  // 최소한의 파트 라벨만 표시
+  const bodyLabel=project3D(deformPoint([0.15,-0.43,0.26]),W,H,SCALE);
+  ctx.fillStyle="#145c4a";ctx.font="bold 11px Nanum Gothic, Arial";ctx.fillText("BLOCK + CYL HEAD",bodyLabel[0]-54,bodyLabel[1]-7);
+  const panLabel=project3D(deformPoint([0.08,-0.30,-0.58]),W,H,SCALE);
+  ctx.fillStyle="#9a5a20";ctx.fillText("OIL PAN",panLabel[0]-22,panLabel[1]+12);
+  const fwhLabel=project3D(deformPoint([0.96,-0.28,0.35]),W,H,SCALE);
+  ctx.fillStyle="#53635f";ctx.fillText("FWH",fwhLabel[0]-10,fwhLabel[1]-6);
+
+  const mountData=[];
+  for(let i=1;i<=4;i++)mountData.push({name:"M"+i,x:mmToM(v(`m${i}x`)),y:mmToM(v(`m${i}y`)),z:mmToM(v(`m${i}z`)),xmm:v(`m${i}x`),ymm:v(`m${i}y`),zmm:v(`m${i}z`)});
+  mountData.forEach(m=>{
+    const pp=project3D(deformPoint([m.x,m.y,m.z]),W,H,SCALE);
+    ctx.beginPath();ctx.arc(pp[0],pp[1],6,0,Math.PI*2);ctx.fillStyle="#e57b24";ctx.fill();ctx.strokeStyle="#8a4510";ctx.lineWidth=1;ctx.stroke();
+    ctx.fillStyle="#17211f";ctx.font="bold 11px Nanum Gothic, Arial";ctx.fillText(`${m.name} (${m.xmm.toFixed(0)}, ${m.ymm.toFixed(0)}, ${m.zmm.toFixed(0)} mm)`,pp[0]+9,pp[1]-8);
+  });
+
+  const cgMm=[v("cgx"),v("cgy"),v("cgz")],cg=cgMm.map(mmToM),cgP=project3D(deformPoint(cg),W,H,SCALE);
+  ctx.beginPath();ctx.arc(cgP[0],cgP[1],8,0,Math.PI*2);ctx.fillStyle="#b43b3b";ctx.fill();ctx.strokeStyle="#fff";ctx.lineWidth=2;ctx.stroke();
+  ctx.beginPath();ctx.moveTo(cgP[0]-12,cgP[1]);ctx.lineTo(cgP[0]+12,cgP[1]);ctx.moveTo(cgP[0],cgP[1]-12);ctx.lineTo(cgP[0],cgP[1]+12);ctx.stroke();
+  ctx.fillStyle="#b43b3b";ctx.font="bold 12px Nanum Gothic, Arial";ctx.fillText(`CG (${cgMm[0].toFixed(0)}, ${cgMm[1].toFixed(0)}, ${cgMm[2].toFixed(0)} mm)`,cgP[0]+10,cgP[1]+18);
+
+  const axisOrigin=[-1.18,-0.88,-0.76],axisScale=0.48,o=project3D(axisOrigin,W,H,SCALE);
+  const axes=[
+    {name:"X / roll",p:[axisOrigin[0]+axisScale,axisOrigin[1],axisOrigin[2]],col:"#b43b3b"},
+    {name:"Y / pitch",p:[axisOrigin[0],axisOrigin[1]+axisScale,axisOrigin[2]],col:"#145c4a"},
+    {name:"Z / yaw",p:[axisOrigin[0],axisOrigin[1],axisOrigin[2]+axisScale],col:"#1e5b91"}
+  ];
+  ctx.lineWidth=3;
+  axes.forEach(a=>{
+    const pp=project3D(a.p,W,H,SCALE);ctx.beginPath();ctx.moveTo(o[0],o[1]);ctx.lineTo(pp[0],pp[1]);ctx.strokeStyle=a.col;ctx.stroke();
+    const dx=pp[0]-o[0],dy=pp[1]-o[1],len=Math.hypot(dx,dy)||1,ux=dx/len,uy=dy/len,sx=pp[0]-ux*10,sy=pp[1]-uy*10;
+    ctx.beginPath();ctx.moveTo(pp[0],pp[1]);ctx.lineTo(sx-uy*5,sy+ux*5);ctx.lineTo(sx+uy*5,sy-ux*5);ctx.closePath();ctx.fillStyle=a.col;ctx.fill();
+    ctx.font="bold 12px Nanum Gothic, Arial";ctx.fillText(a.name,pp[0]+7,pp[1]-7);
+  });
+
+  ctx.fillStyle="#17211f";ctx.font="bold 15px Nanum Gothic, Arial";ctx.fillText(`${DOF[mode.dominant]} mode  |  ${mode.f.toFixed(3)} Hz`,18,28);
+  ctx.font="12px Nanum Gothic, Arial";ctx.fillStyle="#66736f";
+  ctx.fillText(`x=${mode.vec[0].toFixed(3)}  y=${mode.vec[1].toFixed(3)}  z=${mode.vec[2].toFixed(3)}  roll(X)=${mode.vec[3].toFixed(3)}  pitch(Y)=${mode.vec[4].toFixed(3)}  yaw(Z)=${mode.vec[5].toFixed(3)}`,18,49);
+  const view=document.getElementById("animView")?.value||"iso";
+  const viewText=view==="iso"?`Iso view rotation: X=${document.getElementById("viewRx")?.value||0}°  Y=${document.getElementById("viewRy")?.value||0}°  Z=${document.getElementById("viewRz")?.value||0}°`:`${view.toUpperCase()} view`;
+  ctx.fillText("빨강=CG / 주황=M1~M4 / 점선=기준 형상 / 3도형=Body·Oil Pan·FWH",18,68);ctx.fillText(viewText,18,87);
+  ctx.fillText(`displacement scale = ${q>=0?"+":"-"} phase`,18,H-18);
+}
+window.addEventListener("resize",()=>{
+  if(window.lastModes){drawModes(window.lastModes); if(animRAF===null){const sel=document.getElementById("animMode");if(sel&&sel.options.length)draw3DAnimation(window.lastModes[parseInt(sel.value||0)],0,1)}}
+});
+
+refreshAnimationView();
+analyze();
+</script>
+<script src="js/interpret.js"></script>
+<!-- supabase-js는 리포에 동봉된 로컬 사본을 쓴다 — 폐쇄망에서도 즉시 뜨도록(CLAUDE.md CDN 의존 금지 방침) -->
+<script src="lib/supabase.min.js"></script>
+<script src="js/store.js"></script>
+</body>
+</html>
